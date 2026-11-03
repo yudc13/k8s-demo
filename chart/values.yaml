@@ -3,6 +3,9 @@ nameOverride: ""
 # 完全覆盖 fullname（默认是 <release>-<chart>）
 fullnameOverride: ""
 
+# 私有镜像仓库的拉取凭据（Secret 名称）
+imagePullSecrets: []
+
 backend:
   replicas: 2
   image:

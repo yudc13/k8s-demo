@@ -20,6 +20,10 @@ spec:
         # ConfigMap 内容变化时触发滚动更新
         checksum/config: {{ include (print $.Template.BasePath "/configmap-backend.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
