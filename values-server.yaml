@@ -1,0 +1,6 @@
+# 服务器专用 Helm values（不含敏感信息，可提交到仓库）
+fullnameOverride: demo
+
+ingress:
+  enabled: true
+  className: traefik
