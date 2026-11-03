@@ -1,0 +1,48 @@
+# 覆盖 chart 名称
+nameOverride: ""
+# 完全覆盖 fullname（默认是 <release>-<chart>）
+fullnameOverride: ""
+
+backend:
+  replicas: 2
+  image:
+    repository: demo-backend
+    tag: dev
+    pullPolicy: IfNotPresent
+  port: 8080
+  greeting: "你好，这是来自 Kubernetes 后端的响应"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+frontend:
+  replicas: 2
+  image:
+    repository: demo-frontend
+    tag: dev
+    pullPolicy: IfNotPresent
+  port: 80
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+ingress:
+  enabled: true
+  className: traefik
+  # 留空表示不限制域名（按 IP 访问）
+  host: ""
+  annotations: {}
+  tls: []

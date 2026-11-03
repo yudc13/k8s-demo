@@ -1,0 +1,20 @@
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.host }}
+访问地址：http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else }}
+访问地址：http://<节点公网IP>/（Ingress 已启用，className={{ .Values.ingress.className }}）
+{{- end }}
+{{- else }}
+Ingress 未启用，使用端口转发：
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "k8s-demo.fullname" . }}-frontend 8088:{{ .Values.frontend.port }}
+
+然后访问 http://localhost:8088/
+{{- end }}
+
+查看状态：
+
+  kubectl -n {{ .Release.Namespace }} get deploy,svc,pods,hpa,ingress
+
+后端副本数：{{ .Values.backend.replicas }}，前端副本数：{{ .Values.frontend.replicas }}
+{{- if .Values.backend.hpa.enabled }}，HPA 范围 {{ .Values.backend.hpa.minReplicas }}–{{ .Values.backend.hpa.maxReplicas }}（目标 CPU {{ .Values.backend.hpa.targetCPUUtilizationPercentage }}%）{{- end }}
