@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kubernetes Demo · Frontend</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card">
+    <header>
+      <span class="badge">kind-learning</span>
+      <h1>Kubernetes Demo</h1>
+      <p class="sub">Nginx 前端 <span class="arrow">→</span> Node.js 后端</p>
+    </header>
+
+    <section class="status" aria-live="polite">
+      <span id="dot" class="dot pending"></span>
+      <span id="status-text">正在连接后端…</span>
+    </section>
+
+    <dl class="grid">
+      <div><dt>后端消息</dt><dd id="message">—</dd></div>
+      <div><dt>响应 Pod</dt><dd id="pod" class="mono">—</dd></div>
+      <div><dt>Pod 启动时间</dt><dd id="started" class="mono">—</dd></div>
+      <div><dt>本次耗时</dt><dd id="latency">—</dd></div>
+    </dl>
+
+    <button id="refresh" type="button">再请求一次</button>
+
+    <footer>
+      <span id="request-count">已请求 0 次</span>
+      <span>刷新页面或点击按钮，观察 Pod 名称变化（多副本时负载均衡）</span>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
