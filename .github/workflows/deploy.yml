@@ -14,7 +14,6 @@ permissions:
   contents: read
 
 env:
-  REGISTRY: ccr.ccs.tencentyun.com
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -24,50 +23,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build images (linux/amd64)
+        run: |
+          docker build --platform=linux/amd64 -t demo-backend:${IMAGE_TAG} ./backend
+          docker build --platform=linux/amd64 -t demo-frontend:${IMAGE_TAG} ./frontend
 
-      - name: Login to Tencent TCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
+      - name: Save images and package chart
+        run: |
+          docker save demo-backend:${IMAGE_TAG} demo-frontend:${IMAGE_TAG} | gzip > demo-images.tgz
+          tar czf chart.tgz -C . chart
+          ls -lh demo-images.tgz chart.tgz
 
-      - name: Build and push backend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/demo-backend:${{ env.IMAGE_TAG }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
-
-      - name: Build and push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/demo-frontend:${{ env.IMAGE_TAG }}
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
-
-      - name: Package chart
-        run: tar czf chart.tgz -C . chart
-
-      - name: Upload chart to server
+      - name: Upload artifacts to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: chart.tgz
+          source: "demo-images.tgz,chart.tgz"
           target: /tmp
           overwrite: true
 
-      - name: Helm upgrade
+      - name: Import images and helm upgrade
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -76,19 +53,27 @@ jobs:
           script_stop: true
           script: |
             set -e
+
+            echo "==> Import images into k3s containerd"
+            gunzip -c /tmp/demo-images.tgz | sudo k3s ctr images import -
+            rm -f /tmp/demo-images.tgz
+
+            echo "==> Sync chart"
             mkdir -p ~/k8s-demo
             rm -rf ~/k8s-demo/chart
             tar xzf /tmp/chart.tgz -C ~/k8s-demo
             rm -f /tmp/chart.tgz
-            cd ~/k8s-demo
 
+            echo "==> Helm upgrade"
+            cd ~/k8s-demo
             helm upgrade --install demo ./chart -n demo --create-namespace \
               -f values-server.yaml \
-              --set backend.image.repository=${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/demo-backend \
+              --set backend.image.repository=demo-backend \
               --set backend.image.tag=${{ env.IMAGE_TAG }} \
-              --set frontend.image.repository=${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/demo-frontend \
+              --set frontend.image.repository=demo-frontend \
               --set frontend.image.tag=${{ env.IMAGE_TAG }} \
               --wait --timeout 5m
 
+            echo "==> Status"
             kubectl -n demo get pods
             curl -s http://127.0.0.1/api/hello

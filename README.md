@@ -193,57 +193,54 @@ helm upgrade --install demo chart -n demo -f values-prod.yaml
 
 后端设了 `requests.cpu: 50m` 和 HPA `60%` 目标，所以 HPA 的「利用率」是相对 requests 计算的；如果没有 requests，HPA 无法计算百分比。这是新手最容易踩的坑之一。
 
-## CI/CD（GitHub Actions + 腾讯云 TCR）
+## CI/CD（GitHub Actions，无镜像仓库）
 
-服务器所在网络无法直连 GitHub / Docker Hub，所以流水线采用：
+服务器无法直连 GitHub / Docker Hub，且 TCR 需要付费，因此流水线不依赖镜像仓库：
 
 ```text
 push main
   → GitHub Actions 构建 linux/amd64 镜像
-  → 推送到腾讯云 TCR（服务器可快速拉取）
-  → SSH 同步 chart 到服务器
-  → helm upgrade --install（新镜像 tag）
+  → docker save 打包（约 64MB gzip）
+  → scp 到服务器
+  → k3s ctr images import
+  → helm upgrade --install（tag = commit sha）
   → Deployment 滚动更新
 ```
 
-工作流文件：`.github/workflows/deploy.yml`。
+工作流文件：`.github/workflows/deploy.yml`，首次部署约 3–5 分钟（受上传带宽影响）。
 
 ### 需要的 GitHub Secrets
 
 | Secret | 说明 |
 | --- | --- |
-| `TCR_USERNAME` | TCR 访问凭证用户名 |
-| `TCR_PASSWORD` | TCR 访问凭证密码 |
-| `TCR_NAMESPACE` | TCR 命名空间，例如 `k8s-demo` |
 | `SSH_HOST` | 服务器公网 IP |
 | `SSH_USER` | 登录用户，例如 `ubuntu` |
 | `SSH_KEY` | 部署用 SSH 私钥（ed25519） |
 
+无需 TCR 用户名密码，也不需要 imagePullSecrets。
+
 ### 服务器准备
 
-在 `~/k8s-demo/values-server.yaml` 保存服务器专用参数（工作流不会覆盖它）：
+`~/k8s-demo/values-server.yaml` 保存服务器专用参数：
 
 ```yaml
 fullnameOverride: demo
 ingress:
   enabled: true
   className: traefik
-
-# TCR 命名空间为私有时启用，并先创建 Secret：
-# kubectl -n demo create secret docker-registry tcr-pull \
-#   --docker-server=ccr.ccs.tencentyun.com \
-#   --docker-username=<TCR_USERNAME> \
-#   --docker-password=<TCR_PASSWORD>
-# imagePullSecrets:
-#   - name: tcr-pull
 ```
+
+要求：
+
+- `ubuntu` 用户可免密 sudo（导入镜像需要），可用 `ssh ... 'sudo -n true'` 验证
+- `helm`、`kubectl`、`k3s` 已在 PATH 中
 
 ### 工作流做了什么
 
-1. 使用 `docker/build-push-action` 构建 amd64 镜像，tag 为 commit sha
-2. `scp` 把 `chart/` 打包上传到 `/tmp`
-3. SSH 登录执行 `helm upgrade --install`，通过 `--set` 传入新镜像地址和 tag
-4. `--wait` 等待滚动更新完成，最后用 `curl` 验证后端接口
+1. 构建两个 amd64 镜像，tag 为 commit sha
+2. `docker save | gzip` 打包镜像，`tar` 打包 chart
+3. scp 到服务器 `/tmp`
+4. SSH 导入镜像到 k3s containerd，执行 `helm upgrade --install`，`--wait` 等待完成
 
 ### 回滚
 
@@ -252,7 +249,16 @@ helm history demo -n demo
 helm rollback demo <revision> -n demo
 ```
 
-镜像 tag 使用 commit sha，旧版本镜像仍保留在 TCR，回滚不需要重新构建。
+旧镜像仍在服务器的 containerd 中，回滚不需要重新传输。注意定期清理旧 tag，避免占满磁盘：
+
+```bash
+sudo k3s ctr images ls | grep demo-
+sudo k3s ctr images rm <旧tag>
+```
+
+### 备选：阿里云 ACR 个人版
+
+如果以后想要真正的镜像仓库（多节点、CI 与部署解耦），阿里云 ACR 个人版免费，可把工作流替换为 push + `imagePullSecrets` 拉取。
 
 ## 部署到云服务器（k3s）
 
