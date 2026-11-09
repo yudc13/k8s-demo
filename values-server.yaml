@@ -1,6 +1,19 @@
 # 服务器专用 Helm values（不含敏感信息，可提交到仓库）
 fullnameOverride: demo
 
+# 镜像来自服务器本地 registry。
+# k3s 的 containerd 与 registry 同机，所以可以用 127.0.0.1；
+# 以后加 worker 节点时，这里要改成服务器的内网 IP。
+backend:
+  image:
+    repository: 127.0.0.1:5000/demo-backend
+    tag: test
+
+frontend:
+  image:
+    repository: 127.0.0.1:5000/demo-frontend
+    tag: test
+
 ingress:
   enabled: true
   className: traefik
