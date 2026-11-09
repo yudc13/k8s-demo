@@ -193,54 +193,29 @@ helm upgrade --install demo chart -n demo -f values-prod.yaml
 
 后端设了 `requests.cpu: 50m` 和 HPA `60%` 目标，所以 HPA 的「利用率」是相对 requests 计算的；如果没有 requests，HPA 无法计算百分比。这是新手最容易踩的坑之一。
 
-## CI/CD（GitHub Actions，无镜像仓库）
+## CI/CD（Jenkins + 本地镜像仓库）
 
-服务器无法直连 GitHub / Docker Hub，且 TCR 需要付费，因此流水线不依赖镜像仓库：
+服务器无法直连 GitHub / Docker Hub，流水线采用「服务器本地裸仓库 + Jenkins 构建 + 本地 registry」：
 
 ```text
 push main
-  → GitHub Actions 构建 linux/amd64 镜像
-  → docker save 打包（约 64MB gzip）
-  → scp 到服务器
-  → k3s ctr images import
-  → helm upgrade --install（tag = commit sha）
+  → 服务器 /srv/git/k8s-demo.git（Jenkins 轮询）
+  → Jenkins 构建 linux/amd64 镜像
+  → docker push 127.0.0.1:5000
+  → helm upgrade --install -f values-server.yaml（tag = commit sha）
   → Deployment 滚动更新
 ```
 
-工作流文件：`.github/workflows/deploy.yml`，首次部署约 3–5 分钟（受上传带宽影响）。
+完整搭建步骤见 [JENKINS.md](JENKINS.md)。
 
-### 需要的 GitHub Secrets
-
-| Secret | 说明 |
-| --- | --- |
-| `SSH_HOST` | 服务器公网 IP |
-| `SSH_USER` | 登录用户，例如 `ubuntu` |
-| `SSH_KEY` | 部署用 SSH 私钥（ed25519） |
-
-无需 TCR 用户名密码，也不需要 imagePullSecrets。
-
-### 服务器准备
-
-`~/k8s-demo/values-server.yaml` 保存服务器专用参数：
+镜像地址写在 `values-server.yaml`，流水线只覆盖 tag：
 
 ```yaml
-fullnameOverride: demo
-ingress:
-  enabled: true
-  className: traefik
+backend:
+  image:
+    repository: 127.0.0.1:5000/demo-backend
+    tag: test
 ```
-
-要求：
-
-- `ubuntu` 用户可免密 sudo（导入镜像需要），可用 `ssh ... 'sudo -n true'` 验证
-- `helm`、`kubectl`、`k3s` 已在 PATH 中
-
-### 工作流做了什么
-
-1. 构建两个 amd64 镜像，tag 为 commit sha
-2. `docker save | gzip` 打包镜像，`tar` 打包 chart
-3. scp 到服务器 `/tmp`
-4. SSH 导入镜像到 k3s containerd，执行 `helm upgrade --install`，`--wait` 等待完成
 
 ### 回滚
 
@@ -249,16 +224,7 @@ helm history demo -n demo
 helm rollback demo <revision> -n demo
 ```
 
-旧镜像仍在服务器的 containerd 中，回滚不需要重新传输。注意定期清理旧 tag，避免占满磁盘：
-
-```bash
-sudo k3s ctr images ls | grep demo-
-sudo k3s ctr images rm <旧tag>
-```
-
-### 备选：阿里云 ACR 个人版
-
-如果以后想要真正的镜像仓库（多节点、CI 与部署解耦），阿里云 ACR 个人版免费，可把工作流替换为 push + `imagePullSecrets` 拉取。
+旧镜像仍在 registry 中，回滚不需要重新构建。注意定期清理旧 tag，避免占满磁盘（见 JENKINS.md 第 7 节）。
 
 ## 部署到云服务器（k3s）
 

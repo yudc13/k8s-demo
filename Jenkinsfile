@@ -16,6 +16,8 @@ pipeline {
 
     environment {
         KUBECONFIG = '/etc/rancher/k3s/k3s.yaml'
+        // 服务器本地镜像仓库（Jenkins 与 registry 同机）
+        REGISTRY = '127.0.0.1:5000'
     }
 
     triggers {
@@ -41,22 +43,16 @@ pipeline {
             }
         }
 
-        stage('Build images') {
+        stage('Build & Push images') {
             steps {
                 sh '''
                     set -eu
-                    docker build --platform="${IMAGE_PLATFORM}" -t "demo-backend:${IMAGE_TAG}" ./backend
-                    docker build --platform="${IMAGE_PLATFORM}" -t "demo-frontend:${IMAGE_TAG}" ./frontend
-                '''
-            }
-        }
-
-        stage('Import images into k3s') {
-            steps {
-                sh '''
-                    set -eu
-                    docker save "demo-backend:${IMAGE_TAG}" "demo-frontend:${IMAGE_TAG}" \
-                      | gzip | sudo k3s ctr images import -
+                    docker build --platform="${IMAGE_PLATFORM}" \
+                      -t "${REGISTRY}/demo-backend:${IMAGE_TAG}" ./backend
+                    docker build --platform="${IMAGE_PLATFORM}" \
+                      -t "${REGISTRY}/demo-frontend:${IMAGE_TAG}" ./frontend
+                    docker push "${REGISTRY}/demo-backend:${IMAGE_TAG}"
+                    docker push "${REGISTRY}/demo-frontend:${IMAGE_TAG}"
                 '''
             }
         }
@@ -68,9 +64,7 @@ pipeline {
                     helm upgrade --install "${RELEASE}" ./chart \
                       -n "${NAMESPACE}" --create-namespace \
                       -f values-server.yaml \
-                      --set backend.image.repository=demo-backend \
                       --set backend.image.tag="${IMAGE_TAG}" \
-                      --set frontend.image.repository=demo-frontend \
                       --set frontend.image.tag="${IMAGE_TAG}" \
                       --wait --timeout 5m
                 '''
