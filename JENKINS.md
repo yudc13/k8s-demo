@@ -58,9 +58,9 @@ sudo docker images | grep -E 'node|nginx'
 sudo apt update
 sudo apt install -y openjdk-21-jdk
 
-# Jenkins 源（pkg.jenkins.io 可访问，慢的话换清华镜像）
+# Jenkins 源（签名密钥会轮换，当前为 2026 版，有效期至 2028-12-21）
 sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key \
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key \
   | sudo tee /etc/apt/keyrings/jenkins-keyring.asc >/dev/null
 
 echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" \
@@ -71,8 +71,52 @@ sudo apt install -y jenkins
 sudo systemctl enable --now jenkins
 ```
 
-限制 JVM 内存并只监听本机（4GB 机器建议）：
+> 如果 `apt update` 报 `NO_PUBKEY`，说明密钥又轮换了：到
+> `https://www.jenkins.io/doc/book/installing/linux/` 查当前密钥文件名，
+> 替换上面的 `jenkins.io-2026.key` 即可。
 
+> **下载慢怎么办**：`pkg.jenkins.io` 在国内可能只有几 KB/s。从华为云镜像直接下 `.deb`：
+>
+> ```bash
+> cd /tmp
+> curl -O https://mirrors.huaweicloud.com/jenkins/debian-stable/jenkins_2.580.2_all.deb
+> sha512sum jenkins_2.580.2_all.deb   # 与 apt 元数据里的 SHA512 对比
+> sudo apt install -y ./jenkins_2.580.2_all.deb
+> ```
+>
+> 镜像站只有文件目录、没有 apt 索引，所以不适合作为 apt 源长期使用；
+> 升级时重复「下载 deb → apt install」即可。
+
+### 插件下载加速（国内服务器）
+
+`updates.jenkins.io` / `get.jenkins.io` 在国内很慢（实测约 59 KB/s），建议把更新中心切到华为云镜像：
+
+```bash
+sudo sed -i 's#https://updates.jenkins.io/update-center.json#https://mirrors.huaweicloud.com/jenkins/update-center.json#' \
+  /var/lib/jenkins/hudson.model.UpdateCenter.xml
+```
+
+华为镜像的 `update-center.json` 是**重新签名**的，Jenkins 默认不信任，会把更新中心数据丢弃并报
+`Signature verification failed ... Path does not chain with any of the trust anchors`。
+解决办法是把镜像的签名证书加入信任锚（**保留签名校验**，不是关闭校验）：
+
+```bash
+curl -sS https://mirrors.huaweicloud.com/jenkins/update-center.json -o /tmp/uc.json
+python3 - <<'PY'
+import json, base64
+raw = open("/tmp/uc.json").read()
+obj, _ = json.JSONDecoder().raw_decode(raw[raw.find("{"):])
+open("/tmp/huawei-uc.pem", "wb").write(base64.b64decode(obj["signature"]["certificates"][0]))
+PY
+sudo install -o jenkins -g jenkins -m 644 /tmp/huawei-uc.pem \
+  /var/cache/jenkins/war/WEB-INF/update-center-rootCAs/huaweicloud-update-center.crt
+sudo systemctl restart jenkins
+```
+
+> - 证书有效期到 2030-03-03；镜像换证书后需要重新放一次。
+> - Jenkins 升级会重新解压 war，`/var/cache/jenkins/war/` 下的证书可能被覆盖，升级后检查一下。
+
+限制 JVM 内存并只监听本机（4GB 机器建议）：
 ```bash
 sudo mkdir -p /etc/systemd/system/jenkins.service.d
 sudo tee /etc/systemd/system/jenkins.service.d/memory.conf >/dev/null <<'EOF'
